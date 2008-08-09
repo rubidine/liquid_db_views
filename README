@@ -1,0 +1,48 @@
+LiquidDbViews
+=============
+
+Render liquid <http://www.liquidmarkup.org/> templates that are stored in a
+database.  Easy and secure method to let users imlpement their own styles.
+
+This does not provide any mechanism for editing and storing the views,
+only for pulling them out of the database in a nearly transparent way
+for any action for which a template is provided.
+
+This plugin does provide a helper method that is included in controllers
+that render liquid (as described below) that renders partials from a
+database as well.  This method is called 'liquid_partial' and can be used
+from ERb or from within a liquid.  This way you can provide certain extension
+points in your application and not let users define entire pages.
+
+Example
+=======
+
+In any controller you want to render liquid, just put
+'renders_liquid_from_database' like this:
+
+class MyController < ApplicationController
+  renders_liquid_from_database
+end
+
+You can pass options, defaults are shown here:
+:model => :liquid_view
+:path_column => :path
+:body_column => :body
+
+
+This migration works for the model outlined above:
+class CreateLiquidViews < ActiveRecord::Migration
+  def self.up
+    create_table :liquid_views do |t|
+      t.string :path
+      t.text :body
+    end
+    add_index :liquid_views, :path
+  end
+
+  def self.down
+    drop_table :liquid_views
+  end
+end
+
+Copyright (c) 2007 Todd Willey <todd@rubidine.com>, released under the MIT license
