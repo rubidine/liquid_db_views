@@ -30,7 +30,8 @@ module LiquidFromDatabase
     options = {
       :model => :liquid_view,
       :path_column => :path,
-      :body_column => :body
+      :body_column => :body,
+      :raise_errors => false
     }.merge(options)
     write_inheritable_attribute :liquid_options, options
     include LiquidFromDatabase::InstanceMethods
@@ -43,72 +44,99 @@ module LiquidFromDatabase
     # and super() up to ActionController::Base#render if not found
     def render options={}, local_assigns = {}, &b
 
-      # We have not rendered yet
-      rendered = false
-      path = nil
-
-      unless options[:without_liquid]
-        unless options[:path]
-          controller = controller_name
-          action = action_name
-          if where = options[:action]
-            where = where.to_s.split '/'
-            action = where.pop
-            unless where.empty?
-              controller = where.join('/')
-            end
-          end
-          path = "/#{controller}/#{action}"
-        else
-          path = options[:path]
-        end
-
-        rendered = do_liquid_render(
-                     path,
-                     options.keys.include?(:layout) ? options[:layout] : true
-                   )
+      if options[:without_liquid]
+        return super
       end
 
-      # Bubble Up if we didn't find a template
-      if !rendered
-        super
+      path = options[:path] || determine_path(options)
+      layout = options.keys.include?(:layout) ? options[:layout] : true
+      do_liquid_render(path, layout) || super
+    end
+
+    private
+
+    def determine_path options
+      if options[:action]
+        path_from_action_option(options[:action])
+      else
+        "/#{controller_name}/#{action_name}"
       end
+    end
+
+    def path_from_action_option optval
+      where = optval.to_s.gsub(/^\//, '').gsub(/\/$/, '').split('/')
+      action = where.pop
+      controller = where.empty? ? controller_name : where.join('/')
+      "/#{controller}/#{action}"
+    end
+
+    def liquid_options
+      self.class.read_inheritable_attribute(:liquid_options)
     end
 
     # This method queries the model from the database and pipes it to liquid
     def do_liquid_render path, layout=true
-      liquid_options = self.class.read_inheritable_attribute :liquid_options
-
-      kls = liquid_options[:model].to_s.camelize.constantize
-      ll = kls.send("find_by_#{liquid_options[:path_column]}", path)
-      return false unless ll
-
-      templ = Liquid::Template.parse(ll.send(liquid_options[:body_column]))
-      add_variables_to_assigns
-      op = templ.render(
-             @assigns,
-             :filters => master_helper_module,
-             :registers => {:controller => self}
-           )
-
-      if templ.errors and !templ.errors.empty?
-        logger.error "\nLiquid Error: #{templ.errors.join("\n")}\n\n"
-        # should we return false here?
-        # I think not, since we actually have a template, it just didn't work
-        #
-        # XXX maybe have a :raise_errors => true option to raise
-        # a specific error when this happens, in case the editing functions
-        # have a rollback feature.
+      unless db_entry = find_template_model_for_path(path)
+        return false
       end
+
+      templ = prepare_template_from_model(db_entry)
+      render_liquid_template(templ, layout)
+    end
+
+    def find_template_model_for_path path
+      kls = liquid_options[:model].to_s.camelize.constantize
+      kls.send("find_by_#{liquid_options[:path_column]}", path)
+    end
+
+    def prepare_template_from_model inst
+      Liquid::Template.parse(inst.send(liquid_options[:body_column]))
+    end
+
+    def render_liquid_template templ, layout
+      render_method = liquid_options[:raise_errors] ? :render! : :render
+      filters = [master_helper_module]
+      if ff = liquid_options[:filters]
+        filters += [ff].flatten
+      end
+      txt = templ.send(
+              render_method,
+              assigns_from_controller,
+              :filters => filters,
+              :registers => {
+                :controller => self,
+                :request => request,
+                :params => params
+              }
+            )
+      log_template_errors(templ)
 
       # We just call the original render to show the text we want,
       # and pass any template required.
       # 
       # This could probably be changed to @response.body = op,
       # but we would have to work in the layout
-      render(:text => op, :layout => layout, :without_liquid => true)
+      render(:text => txt, :layout => layout, :without_liquid => true)
 
       return true
+    end
+
+    def assigns_from_controller
+      rv = {}
+      variables = instance_variables
+      if respond_to?(:protected_instance_variables)
+        variables -= protected_instance_variables 
+      end
+      variables.each do |ivar|
+        rv[ivar[1..-1]] = instance_variable_get(ivar)
+      end
+      rv
+    end
+
+    def log_template_errors(templ)
+      if templ.errors and !templ.errors.empty?
+        logger.error "\nLiquid Error: #{templ.errors.join("\n")}\n\n"
+      end
     end
 
   end

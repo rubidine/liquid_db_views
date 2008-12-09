@@ -28,6 +28,8 @@ You can pass options, defaults are shown here:
 :model => :liquid_view
 :path_column => :path
 :body_column => :body
+:raise_errors => false
+:filters => [] # extra modules included into the liquid context
 
 
 This migration works for the model outlined above:

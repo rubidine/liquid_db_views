@@ -20,9 +20,13 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 module LiquidDbHelper
+
+  ##
+  #
   # Render liquid from the database.
   # works like render(:partial => name)
   # opts are :locals and :ignore_not_found
+  #
   def liquid_partial path, opts={}
 
     unless @context # called from erb
